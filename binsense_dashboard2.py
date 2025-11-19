@@ -3,78 +3,116 @@ import serial
 import time
 import pandas as pd
 
-# ---- Page Config ----
-st.set_page_config(page_title="Smart Bin Dashboard", layout="wide")
+# ---- AUTO REFRESH EVERY 1 SECOND (JAVASCRIPT, NO FLICKER) ----
+refresh_rate_ms = 1000  # 1 second
+st.markdown(
+    f"""
+    <meta http-equiv="refresh" content="{refresh_rate_ms/1000}">
+    """,
+    unsafe_allow_html=True
+)
 
-# ---- Arduino Setup ----
+# --------- ARDUINO SETUP (SAFE) ---------
 if "arduino" not in st.session_state:
-    st.session_state.arduino = serial.Serial('COM11', 9600, timeout=1)
-    time.sleep(2)
+    try:
+        st.session_state.arduino = serial.Serial('COM12', 9600, timeout=1)
+        time.sleep(2)
+    except Exception as e:
+        st.error(f"❌ COM12 cannot be opened.\nClose Arduino Serial Monitor!\n\n{e}")
+        st.stop()
 
 arduino = st.session_state.arduino
 
-# ---- Data Storage ----
+st.title("💧 Smart Bin IR / Metal / Rain Sensor Dashboard")
+
+# Data list
 if "data" not in st.session_state:
     st.session_state.data = []
 
-st.title("💧 Smart Bin - IR & Rain Sensor Dashboard")
+placeholder = st.empty()
 
-# ---- Read One Line From Serial ----
-line = arduino.readline().decode(errors="ignore").strip()
+# --------- READ ONE FULL SENSOR PACKET ---------
+packet = []
+start = time.time()
 
-if line.startswith("IR:"):
-    try:
-        parts = line.split(',')
-        ir_value = int(parts[0].split(':')[1])
-        rain_value = int(parts[1].split(':')[1])
+while True:
+    raw = arduino.readline().decode(errors="ignore").strip()
 
-        ir_status = "Object Detected" if ir_value == 1 else "No Object"
-        rain_status = "Rain Detected" if rain_value == 1 else "No Rain"
+    if raw == "":
+        if time.time() - start > 0.5:
+            break
+        continue
 
-        st.session_state.data.append({
-            "Time": time.strftime("%H:%M:%S"),
-            "IR Value": ir_value,
-            "IR Status": ir_status,
-            "Rain Value": rain_value,
-            "Rain Status": rain_status
-        })
+    packet.append(raw)
 
-    except:
-        st.write("⚠️ Error parsing:", line)
+    if len(packet) >= 4:
+        break
 
+# --------- DEFAULT VALUES ---------
+ir_status = "Unknown"
+proximity_status = "Unknown"
+rain_analog = 0
+rain_status = "Unknown"
 
-# ---- Convert Data ----
+# --------- PARSE PACKET LINES ---------
+for p in packet:
+    if p.startswith("IR Sensor"):
+        ir_status = p.split(":")[1].strip()
+
+    elif p.startswith("Proximity Sensor"):
+        proximity_status = p.split(":")[1].strip()
+
+    elif p.startswith("Rain Analog Value"):
+        try:
+            rain_analog = int(p.split(":")[1].strip())
+        except:
+            rain_analog = 0
+
+    elif p.startswith("Rain Digital Value"):
+        rain_status = p.split(":")[1].strip()
+
+# --------- APPEND CLEAN RECORD ---------
+record = {
+    "Time": time.strftime("%H:%M:%S"),
+    "IR Status": ir_status,
+    "Metal Status": proximity_status,
+    "Rain Analog": rain_analog,
+    "Rain Digital": rain_status,
+}
+
+st.session_state.data.append(record)
+
+# Keep last 20 rows
 df = pd.DataFrame(st.session_state.data[-20:])
 df_full = pd.DataFrame(st.session_state.data)
 
-# ---- Summary ----
-if not df_full.empty:
-    ir_count = df_full["IR Value"].sum()
-    rain_count = df_full["Rain Value"].sum()
-else:
-    ir_count = rain_count = 0
-
+# --------- SAFE CONVERSION FOR SUMMARY ---------
+def to_numeric_status(val):
+    if val in ["Object Detected", "Object Nearby", "WET"]:
+        return 1
+    return 0
 
 summary_df = pd.DataFrame({
-    "Sensor": ["IR Sensor", "Rain Sensor"],
-    "Times Value = 1": [ir_count, rain_count]
+    "Sensor": ["IR Sensor", "Metal Sensor", "Rain (Digital)"],
+    "Count": [
+        df_full["IR Status"].apply(to_numeric_status).sum(),
+        df_full["Metal Status"].apply(to_numeric_status).sum(),
+        df_full["Rain Digital"].apply(lambda x: 1 if x == "WET" else 0).sum(),
+    ]
 })
 
-# ---- Display ----
-placeholder = st.empty()
+summary_df["Count"] = summary_df["Count"].astype(int)
 
+# --------- ORIGINAL UI (UNCHANGED) ---------
 with placeholder.container():
 
     st.subheader("📊 Live Sensor Readings (Last 20)")
-    st.dataframe(df, use_container_width=True)
+    st.dataframe(df, width='stretch')
 
-    col1, col2 = st.columns(2)
-    col1.metric("IR Status", df.iloc[-1]["IR Status"] if not df.empty else "-")
-    col2.metric("Rain Status", df.iloc[-1]["Rain Status"] if not df.empty else "-")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("IR Sensor", ir_status)
+    col2.metric("Metal Sensor", proximity_status)
+    col3.metric("Rain Status", rain_status)
 
-    st.subheader("📈 Detection Summary")
+    st.subheader("📈 Sensor Detection Summary")
     st.bar_chart(summary_df.set_index("Sensor"))
-
-# ---- Auto Refresh every 1 second ----
-time.sleep(1)
-st.experimental_rerun()
