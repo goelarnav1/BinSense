@@ -1,0 +1,100 @@
+#include <Servo.h>
+
+// ======= Pin Definitions =======
+#define IR_PIN 5
+#define PROXIMITY_PIN 6
+#define RAIN_ANALOG A0
+#define RAIN_DIGITAL 3
+#define SERVO_PIN 7
+#define SERVO2_PIN 10   // NEW SERVO (Rain only)
+
+// ======= Config =======
+bool INVERT_IR = true;
+
+// ======= Globals =======
+Servo myServo;           
+Servo myServo2;          
+int irValue = 0;
+int proximityValue = 0;
+int rainAnalogValue = 0;
+int rainDigitalValue = 0;
+
+bool systemEnabled = false;
+
+void setup() {
+  Serial.begin(9600);
+
+  pinMode(IR_PIN, INPUT);
+  pinMode(PROXIMITY_PIN, INPUT);
+  pinMode(RAIN_DIGITAL, INPUT);
+
+  myServo.attach(SERVO_PIN);
+  myServo2.attach(SERVO2_PIN);
+
+  myServo.write(0);  
+  myServo2.write(0);
+
+  delay(500);
+}
+
+void loop() {
+  // ======= Read Sensors =======
+  irValue = digitalRead(IR_PIN);
+  proximityValue = digitalRead(PROXIMITY_PIN);
+  rainAnalogValue = analogRead(RAIN_ANALOG);
+  rainDigitalValue = digitalRead(RAIN_DIGITAL);
+
+  if (INVERT_IR) irValue = !irValue;
+
+  // ======= PRINT EXACT FORMAT FOR STREAMLIT =======
+  Serial.print("IR Sensor: ");
+  Serial.println(irValue == HIGH ? "Object Detected" : "No Object");
+
+  Serial.print("Proximity Sensor: ");
+  Serial.println(proximityValue == HIGH ? "Object Nearby" : "Not Detected");
+
+  Serial.print("Rain Analog Value: ");
+  Serial.println(rainAnalogValue);
+
+  Serial.print("Rain Digital Value: ");
+  Serial.println(rainDigitalValue == LOW ? "WET" : "DRY");
+
+  // Small separator (optional)
+  Serial.println("---------------------------------------------");
+
+  // ======= IR ENABLES SYSTEM =======
+  if (irValue == HIGH && systemEnabled == false) {
+    systemEnabled = true;  
+  }
+
+  if (!systemEnabled) {
+    delay(500);
+    return;
+  }
+
+  // ======= 1️⃣ RAIN DETECTED =======
+  if (rainDigitalValue == LOW) {
+    myServo2.write(90);
+    delay(10000);
+
+    myServo2.write(0);
+
+    systemEnabled = false;  
+    delay(500);
+    return;
+  }
+
+  // ======= 2️⃣ METAL DETECTED =======
+  if (proximityValue == HIGH) {
+    myServo.write(90);
+    delay(10000);
+
+    myServo.write(0);
+
+    systemEnabled = false;
+    delay(500);
+    return;
+  }
+
+  delay(500);
+}
