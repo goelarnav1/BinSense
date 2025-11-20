@@ -4,7 +4,7 @@ import time
 import pandas as pd
 
 # --- Arduino setup ---
-arduino = serial.Serial('COM11', 9600, timeout=1)
+arduino = serial.Serial('COM12', 9600, timeout=1)
 time.sleep(2)
 
 st.title("💧 Smart Bin IR & Rain Sensor Dashboard")
